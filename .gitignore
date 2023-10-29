@@ -1,0 +1,9 @@
+# .gitignore
+venv
+archive (2).zip
+
+advanced-tensorflow
+
+images
+train
+test
