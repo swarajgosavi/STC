@@ -19,12 +19,12 @@ parser.add_argument(
     default="0.0.0.0:8080",
     help=f"gRPC server address (deafault '0.0.0.0:8080')",
 )
-parser.add_argument(
-    "--cid",
-    type=int,
-    required=True,
-    help="Client id. Should be an integer between 0 and NUM_CLIENTS",
-)
+# parser.add_argument(
+#     "--cid",
+#     type=int,
+#     required=True,
+#     help="Client id. Should be an integer between 0 and NUM_CLIENTS",
+# )
 
 NUM_CLIENTS = 50
 
@@ -59,49 +59,52 @@ def prepare_dataset():
                                                                 subset = "validation"
                                                                 )
     
-    partitions = []
-    # We keep all partitions equal-sized in this example
-    partition_size = math.floor(len(train_generator) / NUM_CLIENTS)
-    for cid in range(NUM_CLIENTS):
-        # Split dataset into non-overlapping NUM_CLIENT partitions
-        idx_from, idx_to = int(cid) * partition_size, (int(cid) + 1) * partition_size
+    # partitions = []
+    # # We keep all partitions equal-sized in this example
+    # partition_size = math.floor(len(train_generator) / NUM_CLIENTS)
+    # for cid in range(NUM_CLIENTS):
+    #     # Split dataset into non-overlapping NUM_CLIENT partitions
+    #     idx_from, idx_to = int(cid) * partition_size, (int(cid) + 1) * partition_size
 
-        train_generator_cid = train_generator[idx_from:idx_to]
+    #     train_generator_cid = train_generator[idx_from:idx_to]
 
-        # now partition into train/validation
-        # Use 10% of the client's training data for validation
-        split_idx = math.floor(len(train_generator_cid) * 0.9)
+    #     # now partition into train/validation
+    #     # Use 10% of the client's training data for validation
+    #     split_idx = math.floor(len(train_generator_cid) * 0.9)
 
-        client_train = train_generator_cid[:split_idx]
-        client_val = train_generator_cid[split_idx:]
-        partitions.append((client_train, client_val))
+    #     client_train = train_generator_cid[:split_idx]
+    #     client_val = train_generator_cid[split_idx:]
+    #     partitions.append((client_train, client_val))
 
-    return partitions, validation_generator
+    return train_generator, validation_generator
 
 # Define Flower client
 class FlowerClient(fl.client.NumPyClient):
 
-    def __init__(self, trainset, valset, use_mnist: bool):
-        self.x_train, self.y_train = trainset
-        self.x_val, self.y_val = valset
+    def __init__(self, trainset, valset):
+        self.trainset = trainset
+        self.valset = valset
 
         self.model = model = keras.Sequential(
             [
                 keras.Input(shape=(48, 48, 1)),
-                keras.layers.Conv2D(32, kernel_size=(3, 3), activation="relu"),
-                keras.layers.BatchNormalization(),
-                keras.layers.MaxPooling2D(pool_size=(2, 2)),
-                keras.layers.Conv2D(64, kernel_size=(3, 3), activation="relu"),
-                keras.layers.BatchNormalization(),
-                keras.layers.MaxPooling2D(pool_size=(2, 2)),
-                keras.layers.Dropout(0.25),
-
-                keras.layers.Conv2D(128, kernel_size=(5, 5), activation="relu"),
+                keras.layers.Conv2D(32, kernel_size=(3, 3), padding='same',activation="relu"),
+                keras.layers.Conv2D(64, kernel_size=(3, 3), padding='same',activation="relu"),
                 keras.layers.BatchNormalization(),
                 keras.layers.MaxPooling2D(pool_size=(2, 2)),
                 keras.layers.Dropout(0.25),
 
-                keras.layers.Conv2D(512, kernel_size=(3, 3), activation="relu", kernel_regularizer=regularizers.l2(0.01)),
+                keras.layers.Conv2D(128, kernel_size=(5, 5), padding='same',activation="relu"),
+                keras.layers.BatchNormalization(),
+                keras.layers.MaxPooling2D(pool_size=(2, 2)),
+                keras.layers.Dropout(0.25),
+
+                keras.layers.Conv2D(512, kernel_size=(3, 3), padding='same',activation="relu", kernel_regularizer=regularizers.l2(0.01)),
+                keras.layers.BatchNormalization(),
+                keras.layers.MaxPooling2D(pool_size=(2, 2)),
+                keras.layers.Dropout(0.25),
+
+                keras.layers.Conv2D(512, kernel_size=(3, 3), padding='same',activation="relu", kernel_regularizer=regularizers.l2(0.01)),
                 keras.layers.BatchNormalization(),
                 keras.layers.MaxPooling2D(pool_size=(2, 2)),
                 keras.layers.Dropout(0.25),
@@ -139,7 +142,7 @@ class FlowerClient(fl.client.NumPyClient):
         # Set hyperparameters from config sent by server/strategy
         batch, epochs = config["batch_size"], config["epochs"]
         # train
-        self.model.fit(self.x_train, self.y_train, epochs=epochs, batch_size=batch)
+        self.model.fit(self.trainset, epochs=epochs, batch_size=batch)
         return self.get_parameters({}), len(self.x_train), {}
 
     def evaluate(
@@ -147,19 +150,22 @@ class FlowerClient(fl.client.NumPyClient):
     ) -> Tuple[int, float, float]:
         print("Client sampled for evaluate()")
         self.set_parameters(parameters)
-        loss, accuracy = self.model.evaluate(self.x_val, self.y_val)
-        return loss, len(self.x_val), {"accuracy": accuracy}
+        loss, accuracy = self.model.evaluate(self.valset)
+        return loss, len(self.valset), {"accuracy": accuracy}
 
 
 def main():
     args = parser.parse_args()
     print(args)
 
-    assert args.cid < NUM_CLIENTS
+    # assert args.cid < NUM_CLIENTS
 
     # Download CIFAR-10 dataset and partition it
-    partitions, _ = prepare_dataset()
-    trainset, valset = partitions[args.cid]
+    # partitions, _ = prepare_dataset()
+    # trainset, valset = partitions[args.cid]
+
+    trainset, valset = prepare_dataset()
+
 
     # Start Flower client setting its associated data partition
     fl.client.start_numpy_client(
